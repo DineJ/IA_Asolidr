@@ -1,0 +1,49 @@
+flowchart
+
+A[Login]
+B[Accueil]
+C[Menus]
+D[Commande]
+E["Bons de commande"]
+F{Allergène ?}
+G{Génération automatique documents IA}
+H{Erreur ?}
+I{Générérer à la main ?}
+J[Site]
+K{Présence personne allergique ?}
+L{Ajout de la mention allergène spécifique sur le site}
+
+
+A --> |Admin| B
+
+B --> |Déconnexion| A
+B <--> |Accéder/Retour| C
+B <--> |Accéder/Retour| D
+B <--> |Accéder/Retour| E
+B <--> |Accéder/Retour| J
+
+D --> |CRUD| D
+D --> |Avoir| F
+
+F --> |Non| D
+F --> |Oui| G
+
+G --> H
+
+H --> |Oui| I
+H --> |Non| C
+
+I --> |Oui| C
+I --> |Non| G
+
+C <--> |Consulter| E
+C --> |CRUD| C
+E -->|CRUD| E
+
+J -->|RD| J
+J --> |CU| K
+
+K -->|Oui| L
+K -->|Non| J
+
+L --> J
