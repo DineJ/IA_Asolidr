@@ -1,0 +1,88 @@
+﻿origine;identifiant;fichier_source;champ;valeur_originale;motif
+menus;M00033;_menu sem 33.xls;entree;17 kg;quantite_seule_a_verifier
+menus;M00036;_menu sem 33.xls;entree;9 kg;quantite_seule_a_verifier
+menus;M00038;_menu sem 33.xls;entree;15 kg;quantite_seule_a_verifier
+menus;M00525;_menu sem 16.xlsx;proteine;FILET DE POULET À découper en morceaux;consigne_a_verifier
+menus;M00526;_menu sem 16.xlsx;proteine;CUISSE DE POULET À découper en 2 (2 parts);quantite_finale_retirée|consigne_a_verifier
+menus;M00527;_menu sem 16.xlsx;proteine;FILET DE POULET À découper en morceaux;consigne_a_verifier
+menus;M00528;_menu sem 16.xlsx;proteine;CUISSE DE POULET À découper en 2 (2 parts);quantite_finale_retirée|consigne_a_verifier
+menus;M00529;_menu sem 16.xlsx;proteine;FILET DE POULET à découper en morceaux;consigne_a_verifier
+menus;M00530;_menu sem 16.xlsx;proteine;CUISSE DE POULET À découper en 2 (2 parts);quantite_finale_retirée|consigne_a_verifier
+menus;M00531;_menu sem 16.xlsx;proteine;FILET DE POULET SAUCE AU POIVRE À découper en morceaux;consigne_a_verifier
+menus;M00532;_menu sem 16.xlsx;proteine;CUISSE DE POULET SAUCE CURRY À découper en 2 (2 parts);quantite_finale_retirée|consigne_a_verifier
+menus;M00533;_menu sem 17.xlsx;proteine;FILET DE POULET SAUCE BECHAMELLE à découper en morceaux;consigne_a_verifier
+menus;M00535;_menu sem 17.xlsx;proteine;FILET DE POULET à découper en morceaux;consigne_a_verifier
+menus;M00537;_menu sem 17.xlsx;proteine;FILET DE POULET à découper en morceaux;consigne_a_verifier
+menus;M00538;_menu sem 17.xlsx;proteine;HAUT CUISSE DE POULET à découper en morceaux;consigne_a_verifier
+menus;M00542;_menu sem 17.xlsx;proteine;FILET DE POULET à découper en morceaux;consigne_a_verifier
+menus;M00547;_menu sem 18.xlsx;proteine;HAUTS DE CUISSE DE POULET à découper en morceaux;consigne_a_verifier
+menus;M00548;_menu sem 18.xlsx;proteine;FILET DE POULET 5 KG OU BROCHETTES 19 PARTS;quantite_finale_retirée|quantite_interne_a_verifier
+menus;M00551;_menu sem 18.xlsx;proteine;HAUTS DE CUISSE DE POULET à découper en morceaux;consigne_a_verifier
+menus;M00582;_menu sem 20.xlsx;proteine;PILON DE POULET 130 parts DLC 14/05;quantite_interne_a_verifier|consigne_a_verifier
+menus;M00583;_menu sem 20.xlsx;proteine;FILET DE POULET 10 kg;quantite_finale_retirée
+menus;M00584;_menu sem 20.xlsx;proteine;CUISSE DE POULET 110 parts;quantite_finale_retirée
+menus;M00586;_menu sem 20.xlsx;proteine;CUISSE DE POULET 130 parts;quantite_finale_retirée
+menus;M00587;_menu sem 20.xlsx;proteine;KEBAB 10 KG;quantite_finale_retirée
+menus;M00595;_menu sem 21.xlsx;proteine;KEBAB 85 parts CAES;quantite_interne_a_verifier
+menus;M00659;_menu sem 26.xlsx;proteine;POULET DESOSSE (15KG);quantite_finale_retirée
+menus;M00666;_menu sem 26.xlsx;proteine;POULET désossé (10 kg);quantite_finale_retirée
+menus;M00669;_menu sem 26.xlsx;proteine;POULET désossé (17,5 kg);quantite_finale_retirée
+menus;M00693;_menu sem 28.xlsx;proteine;FILET DE PANGA (à découper en 3);consigne_a_verifier
+menus;M00695;_menu sem 28.xlsx;proteine;ROULEAU FROMAGE EPINARD (à découper en 8);consigne_a_verifier
+menus;M00721;_menu sem 30.xlsx;proteine;FILET DE PANGA (à découper en 3) + menu alternatif 4 allergies;consigne_a_verifier
+menus;M00596;_menu sem 21.xlsx;feculent;- reste pilons salariés RIZ;quantite_finale_retirée
+menus;M00622;_menu sem 23.xlsx;legumes;+ prévoir un menu pour cuisine+ménage;consigne_a_verifier
+menus;M00020;_menu sem 32.xls;repas;;incomplet_a_verifier
+menus;M00497;_menu sem 14.xlsx;repas;;incomplet_a_verifier
+menus;M00498;_menu sem 14.xlsx;repas;;incomplet_a_verifier
+menus;M00499;_menu sem 14.xlsx;repas;;incomplet_a_verifier
+menus;M00500;_menu sem 14.xlsx;repas;;incomplet_a_verifier
+menus;M00501;_menu sem 14.xlsx;repas;;incomplet_a_verifier
+menus;M00502;_menu sem 14.xlsx;repas;;incomplet_a_verifier
+menus;M00503;_menu sem 14.xlsx;repas;;incomplet_a_verifier
+menus;M00504;_menu sem 14.xlsx;repas;;incomplet_a_verifier
+menus;M00777;_menu sem 34.xlsx;repas;;incomplet_a_verifier
+menus;M00778;_menu sem 34.xlsx;repas;;incomplet_a_verifier
+menus;M00779;_menu sem 34.xlsx;repas;;incomplet_a_verifier
+menus;M00780;_menu sem 34.xlsx;repas;;incomplet_a_verifier
+menus;M00781;_menu sem 34.xlsx;repas;;incomplet_a_verifier
+menus;M00783;_menu sem 34.xlsx;repas;;incomplet_a_verifier
+menus;M00784;_menu sem 34.xlsx;repas;;incomplet_a_verifier
+propositions_anciennes;P07014;Menu sem 12.xlsx;proposition;Colin pané menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07015;Menu sem 12.xlsx;proposition;Escalope de dinde menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P07090;Menu sem 13.xlsx;proposition;Colin pané menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07091;Menu sem 13.xlsx;proposition;Escalope de dinde menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P07165;Menu sem 14.xlsx;proposition;Colin pané menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07166;Menu sem 14.xlsx;proposition;Escalope de dinde menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P07240;Menu sem 15.xlsx;proposition;Colin pané menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07241;Menu sem 15.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P07315;Menu sem 16.xlsx;proposition;Colin pané menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07316;Menu sem 16.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P07390;Menu sem 17.xlsx;proposition;CORDON BLEU menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07391;Menu sem 17.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P07465;Menu sem 18.xlsx;proposition;CORDON BLEU menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07466;Menu sem 18.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P07540;Menu sem 19.xlsx;proposition;CORDON BLEU menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07541;Menu sem 19.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P07615;Menu sem 20.xlsx;proposition;CORDON BLEU menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07616;Menu sem 20.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P07690;Menu sem 21.xlsx;proposition;CORDON BLEU menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07691;Menu sem 21.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P07765;Menu sem 22.xlsx;proposition;CORDON BLEU menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07766;Menu sem 22.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P07840;Menu sem 23.xlsx;proposition;CORDON BLEU menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07841;Menu sem 23.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P07915;Menu sem 24.xlsx;proposition;CORDON BLEU menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07916;Menu sem 24.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P07990;Menu sem 25.xlsx;proposition;Brochette menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P07991;Menu sem 25.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P08065;Menu sem 26.xlsx;proposition;CORDON BLEU menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P08066;Menu sem 26.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P08140;Menu sem 27.xlsx;proposition;CORDON BLEU menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P08141;Menu sem 27.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P08215;Menu sem 28.xlsx;proposition;CORDON BLEU menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P08216;Menu sem 28.xlsx;proposition;Rougail saucisses menu mardi midi;mention_service_a_verifier
+propositions_anciennes;P08291;Menu sem 29.xlsx;proposition;sauté de dinde menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P08366;Menu sem 30.xlsx;proposition;sauté de dinde menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P08442;Menu sem 31.xlsx;proposition;sauté de dinde menu lundi soir;mention_service_a_verifier
+propositions_anciennes;P08518;Menu sem 32.xlsx;proposition;sauté de dinde menu lundi soir;mention_service_a_verifier
