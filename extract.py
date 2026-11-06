@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Extract Excel menu data without normalizing dish names.
 
-Usage: python extract_corrige_v2.py --input data/raw --output data/processed
+Usage: python extract_avec_alertes.py --input data/raw --output data/processed
 Dependencies: openpyxl and xlrd (for legacy .xls files).
 
-The two output CSV files are overwritten when the program runs. Original
+The two output CSV files are overwritten only with --ecraser. Original
 Excel workbooks are never modified.
 """
 
@@ -82,40 +82,126 @@ def is_day_label(value):
     return bool(DAY_LABEL.fullmatch(match_text(value).strip()))
 
 
-def read_sheets(path):
-    """Yield sheet names and 1-based cell accessors from an Excel workbook.
+def expected_sheet(path, root):
+    """Return the exact expected sheet name type and week for a workbook.
 
     Args:
-        path (Path): .xls or .xlsx workbook path.
-    Yields:
-        tuple[str, callable]: Sheet name and cell(row, column) accessor.
+        path (Path): Source Excel file.
+        root (Path): Root directory containing year folders.
+    Returns:
+        tuple[str, int | None]: Expected format and week number.
+    Raises:
+        ValueError: If the year or historical week cannot be identified.
+    """
+    relative_parts = path.relative_to(root).parts
+    years = [int(part) for part in relative_parts[:-1]
+             if re.fullmatch(r"20\d{2}", part)]
+    if not years:
+        raise ValueError("Year folder missing (expected data/raw/YYYY/)")
+    year = years[-1]
+    if year == 2026:
+        return 'MENUS', None
+    if year == 2025:
+        return 'RECAP', None
+    if 2022 <= year <= 2024:
+        match = re.search(r"(?:sem(?:aine)?[\s_.-]*)(\d{1,2})(?!\d)",
+                          match_text(path.stem))
+        if not match:
+            raise ValueError("Week number not found in file name")
+        return 'GRILLE', int(match.group(1))
+    raise ValueError(f"Unsupported year: {year}")
+
+
+def sheet_matches(name, fmt, week):
+    """Check whether a sheet is suitable for the selected year's layout."""
+    normalized = match_text(name).strip()
+    if fmt == 'MENUS':
+        return normalized == 'menus'
+    if fmt == 'RECAP':
+        return normalized in ('recap', 'menus')
+    # Accept week labels with an optional 'midi' suffix.
+    return bool(re.fullmatch(
+        r"(?:sem(?:aine)?[\s_.-]*)?0*" + str(week) + r"(?:[\s_.-]*midi)?",
+        normalized,
+    ))
+
+
+def choose_sheet(names, fmt, week):
+    """Choose exactly one sheet; never guess among ambiguous multi-sheet grids.
+
+    Returns:
+        tuple[str | None, str | None]: Selected sheet and optional warning.
+    """
+    if fmt == 'RECAP':
+        # Older 2025 workbooks use RECAP; later ones use MENUS.
+        for preferred in ('recap', 'menus'):
+            for name in names:
+                if match_text(name).strip() == preferred:
+                    return name, None
+        return None, None
+    if fmt == 'MENUS':
+        return next((name for name in names if sheet_matches(name, fmt, week)), None), None
+
+    matches = [name for name in names if sheet_matches(name, fmt, week)]
+    if matches:
+        # Prefer the recap grid over other sheets of the same week.
+        matches.sort(key=lambda name: ('midi' not in match_text(name), names.index(name)))
+        return matches[0], None
+    if len(names) == 1:
+        # Many historical workbooks were copied without renaming their only tab.
+        return names[0], (f"sheet name {names[0]!r} does not match week {week}; "
+                          "using the only sheet")
+    return None, None
+
+
+def read_selected_sheet(path, fmt, week):
+    """Read only the expected worksheet and report the other worksheet names.
+
+    Args:
+        path (Path): Excel workbook.
+        fmt (str): MENUS, RECAP or GRILLE.
+        week (int | None): Week for historical grids.
+    Returns:
+        tuple[str | None, callable | None, list[str], list[str], str | None]:
+            Selected sheet, accessor, all names, skipped names and selection warning.
     """
     if path.suffix.lower() == '.xls':
         import xlrd
-        workbook = xlrd.open_workbook(str(path))
-        for sheet in workbook.sheets():
-            def cell(row, column, data=sheet):
-                """Return a legacy Excel cell value, or None outside the sheet."""
-                if 1 <= row <= data.nrows and 1 <= column <= data.ncols:
-                    return data.cell_value(row - 1, column - 1)
-                return None
-            yield sheet.name, cell
+        workbook = xlrd.open_workbook(str(path), on_demand=True)
+        try:
+            names = workbook.sheet_names()
+            selected, selection_warning = choose_sheet(names, fmt, week)
+            skipped = [name for name in names if name != selected]
+            if selected is None:
+                return None, None, names, skipped, None
+            sheet = workbook.sheet_by_name(selected)
+            # Cache only the required region before closing the workbook.
+            rows = [[sheet.cell_value(r, c) if r < sheet.nrows and c < sheet.ncols
+                     else None for c in range(22)] for r in range(65)]
+        finally:
+            workbook.release_resources()
     else:
         workbook = load_workbook(path, read_only=True, data_only=True)
         try:
-            for sheet in workbook:
-                sheet.reset_dimensions()
-                # Cache the area used by both known menu formats.
-                rows = list(sheet.iter_rows(min_row=1, max_row=65, min_col=1,
-                                            max_col=22, values_only=True))
-                def cell(row, column, data=rows):
-                    """Return a modern Excel cell value, or None outside the cache."""
-                    if 1 <= row <= len(data) and 1 <= column <= len(data[row - 1]):
-                        return data[row - 1][column - 1]
-                    return None
-                yield sheet.title, cell
+            names = workbook.sheetnames
+            selected, selection_warning = choose_sheet(names, fmt, week)
+            skipped = [name for name in names if name != selected]
+            if selected is None:
+                return None, None, names, skipped, None
+            sheet = workbook[selected]
+            sheet.reset_dimensions()
+            rows = list(sheet.iter_rows(min_row=1, max_row=65, min_col=1,
+                                        max_col=22, values_only=True))
         finally:
             workbook.close()
+
+    def cell(row, column, data=rows):
+        """Return a 1-based cell value from the selected worksheet only."""
+        if 1 <= row <= len(data) and 1 <= column <= len(data[row - 1]):
+            return data[row - 1][column - 1]
+        return None
+
+    return selected, cell, names, skipped, selection_warning
 
 
 def find_header(cell):
@@ -223,25 +309,6 @@ def extract_grid(path, root, sheet, cell):
     return proposals
 
 
-def detect_format(sheets):
-    """Select a MENUS, RECAP or historical grid sheet.
-
-    Args:
-        sheets (list[tuple]): Sheet names and cell accessors.
-    Returns:
-        tuple | None: Format, name, accessor, mapping and header row.
-    """
-    for target in ('menus', 'recap'):
-        for name, cell in sheets:
-            if match_text(name).strip() == target:
-                mapping, header = find_header(cell)
-                if mapping:
-                    return target.upper(), name, cell, mapping, header
-    for name, cell in sheets:
-        if 'entree' in match_text(cell(7, 2)) and 'plat' in match_text(cell(11, 2)):
-            return 'GRILLE', name, cell, None, None
-    return None
-
 
 def write_csv(path, columns, records):
     """Write records as a semicolon-delimited UTF-8 CSV file.
@@ -260,7 +327,7 @@ def write_csv(path, columns, records):
 
 
 def main():
-    """Extract supported workbooks and write the two CSV output files.
+    """Extract one designated sheet per workbook to a unified CSV.
 
     Args:
         None. CLI options: --input and --output.
@@ -276,47 +343,91 @@ def main():
     if not args.input.is_dir():
         parser.error(f'Input directory not found: {args.input}')
 
+    # Refuse overwriting either generated CSV unless explicitly requested.
+    outputs = ('historique_menus.csv', 'alert.csv')
+    existing = [name for name in outputs if (args.output / name).exists()]
+    if existing and not args.ecraser:
+        parser.error('Output already exists: ' + ', '.join(existing)
+                     + '. Choose another --output or use --ecraser.')
+
     files = sorted(path for path in args.input.rglob('*')
                    if path.is_file() and path.suffix.lower() in ('.xls', '.xlsx')
                    and not path.name.startswith('~$'))
-    meals, proposals, counts = [], [], Counter()
+    meals, proposals, alerts, counts = [], [], [], Counter()
+
+    def alert(relative, level, code, message, sheet='', total_sheets=None):
+        """Collect a warning or error without printing it to the terminal."""
+        alerts.append({
+            'fichier_source': relative,
+            'niveau': level,
+            'code': code,
+            'onglet': sheet,
+            'nombre_feuilles': '' if total_sheets is None else total_sheets,
+            'message': message,
+        })
+
     for path in files:
         relative = path.relative_to(args.input).as_posix()
         try:
-            selection = detect_format(list(read_sheets(path)))
-            if selection is None:
+            fmt, week = expected_sheet(path, args.input)
+            name, cell, names, skipped, selection_warning = read_selected_sheet(path, fmt, week)
+            if name is None:
                 counts['unknown'] += 1
-                print(f'WARNING unknown format: {relative}')
+                expected = ('Menus' if fmt == 'MENUS' else 'Recap/Menus' if fmt == 'RECAP'
+                            else str(week))
+                alert(relative, 'ERREUR', 'FEUILLE_INTROUVABLE',
+                      f"Feuille attendue : {expected!r}. Feuilles disponibles : {names!r}",
+                      total_sheets=len(names))
                 continue
-            fmt, name, cell, mapping, header = selection
+            if selection_warning:
+                alert(relative, 'AVERTISSEMENT', 'NOM_FEUILLE_DIFFERENT',
+                      selection_warning, sheet=name, total_sheets=len(names))
+            if skipped:
+                alert(relative, 'AVERTISSEMENT', 'FEUILLES_IGNOREES',
+                      f"1 feuille traitee ({name!r}); {len(skipped)} ignoree(s) : {skipped!r}",
+                      sheet=name, total_sheets=len(names))
+            mapping, header = (find_header(cell) if fmt != 'GRILLE' else (None, None))
+            if fmt != 'GRILLE' and mapping is None:
+                counts['unknown'] += 1
+                alert(relative, 'ERREUR', 'ENTETES_INVALIDES',
+                      f"En-tetes non reconnus dans {name!r}",
+                      sheet=name, total_sheets=len(names))
+                continue
             if fmt == 'GRILLE':
                 extracted = extract_grid(path, args.input, name, cell)
                 proposals.extend(extracted)
             else:
                 extracted = extract_meals(path, args.input, name, cell, mapping,
-                                          header, recap=(fmt == 'RECAP'))
+                                          header, recap=(match_text(name).strip() == 'recap'))
                 meals.extend(extracted)
             counts[fmt] += 1
             if not extracted:
-                print(f'WARNING no data: {relative} ({fmt})')
-            print(f'{relative}: {len(extracted)} rows ({fmt})')
+                alert(relative, 'AVERTISSEMENT', 'AUCUNE_DONNEE',
+                      f"Aucune ligne extraite (format {fmt})",
+                      sheet=name, total_sheets=len(names))
         except Exception as exc:
             counts['errors'] += 1
-            print(f'ERROR {relative}: {type(exc).__name__}: {exc}')
+            alert(relative, 'ERREUR', 'EXCEPTION',
+                  f'{type(exc).__name__}: {exc}')
 
+    columns = ('type_enregistrement', *MENU_COLUMNS,
+               'colonne_excel', 'categorie', 'sous_categorie', 'proposition')
+    records = ([{'type_enregistrement': 'repas', **row} for row in meals]
+               + [{'type_enregistrement': 'plat_historique', **row} for row in proposals])
     args.output.mkdir(parents=True, exist_ok=True)
-    existing = [name for name in ('menus.csv', 'propositions_anciennes.csv')
-                if (args.output / name).exists()]
-    if existing and not args.ecraser:
-        parser.error('Output already exists: ' + ', '.join(existing)
-                     + '. Choose another --output or use --ecraser.')
-    write_csv(args.output / 'menus.csv', MENU_COLUMNS, meals)
-    write_csv(args.output / 'propositions_anciennes.csv', PROPOSAL_COLUMNS, proposals)
-    print(f'Files: {len(files)} | MENUS: {counts["MENUS"]} | '
-          f'RECAP: {counts["RECAP"]} | GRILLE: {counts["GRILLE"]} | '
-          f'unknown: {counts["unknown"]} | errors: {counts["errors"]}')
-    print(f'Meals: {len(meals)} | Proposals: {len(proposals)}')
-    print(f'Output: {args.output.resolve()}')
+    write_csv(args.output / 'historique_menus.csv', columns, records)
+    write_csv(args.output / 'alert.csv',
+              ('fichier_source', 'niveau', 'code', 'onglet', 'nombre_feuilles', 'message'),
+              alerts)
+
+    successful = counts['MENUS'] + counts['RECAP'] + counts['GRILLE']
+    error_count = sum(item['niveau'] == 'ERREUR' for item in alerts)
+    warning_count = sum(item['niveau'] == 'AVERTISSEMENT' for item in alerts)
+    print(f"Extraction terminee | fichiers : {len(files)} | traites : {successful} "
+          f"| non traites : {len(files) - successful} | erreurs : {error_count} "
+          f"| avertissements : {warning_count} | repas : {len(meals)} "
+          f"| propositions : {len(proposals)} | sorties : "
+          f"{args.output / 'historique_menus.csv'}, {args.output / 'alert.csv'}")
 
 
 if __name__ == '__main__':
