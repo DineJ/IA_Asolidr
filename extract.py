@@ -1,29 +1,40 @@
 #!/usr/bin/env python3
 """Extract Excel menu data without normalizing dish names.
 
-Usage: python extract_avec_alertes.py --input data/raw --output data/processed
+Usage: python extract.py --input data/raw --output data/processed
 Dependencies: openpyxl and xlrd (for legacy .xls files).
 
 The two output CSV files are overwritten only with --ecraser. Original
 Excel workbooks are never modified.
 """
 
+# Parse command-line options such as --input, --output and --ecraser.
 import argparse
+# Read and write CSV files using the Python standard library.
 import csv
+# Use regular expressions to identify years, weeks and worksheet labels.
 import re
+# Normalize Unicode characters when comparing labels.
 import unicodedata
+# Count processed formats and annex sheets.
 from collections import Counter
+# Represent filesystem paths safely and portably.
 from pathlib import Path
 
+# Read modern .xlsx workbooks with openpyxl.
 from openpyxl import load_workbook
 
+# Define the food fields extracted from recent menus.
 MENU_FIELDS = ('entree', 'proteine', 'feculent', 'legumes', 'dessert_base', 'dessert_resto')
+# Define CSV provenance and food columns for meals.
 MENU_COLUMNS = ('fichier_source', 'chemin_source', 'onglet', 'ligne_excel',
                 'type_menu', *MENU_FIELDS, 'enfant')
+# Define the source and classification columns for historical proposals.
 PROPOSAL_COLUMNS = ('fichier_source', 'chemin_source', 'onglet', 'ligne_excel',
-                    'colonne_excel', 'categorie', 'sous_categorie', 'proposition')
+                    'colonne_excel', 'categorie', 'sous_categorie', 'proposition', 'type_feuille')
 
 # The historical layout uses fixed rows for categories and fixed columns for days.
+# Map Excel row numbers to historical food categories.
 GRID_ROWS = {
     7: ('entree', 'ENTREE 1'), 8: ('entree', 'ENTREE 2'),
     9: ('entree', 'ENTREE 3'), 10: ('entree', 'ENTREE 4'),
@@ -35,14 +46,15 @@ GRID_ROWS = {
     23: ('dessert', 'DESSERT 1'), 24: ('fruit', 'FRUIT 1'),
     25: ('dessert', 'DESSERT 2'), 26: ('fruit', 'FRUIT 2'),
 }
+# List the Excel columns used by the historical weekly grid.
 GRID_COLUMNS = (4, 6, 8, 10, 12, 14, 16)
+# Define the mandatory header names used to recognize a recent menu.
 EXPECTED_HEADERS = ('entree', 'proteine', 'feculent', 'legumes')
-DAY_LABEL = re.compile(
-    r'(?:LUNDI|MARDI|MERCREDI|JEUDI|VENDREDI|SAMEDI|DIMANCHE)'
-    r'(?:\s+(?:MIDI|SOIR))?', re.IGNORECASE
-)
+# Compile a reusable regular expression for day labels.
+DAY_LABEL = re.compile(r'(?:LUNDI|MARDI|MERCREDI|JEUDI|VENDREDI|SAMEDI|DIMANCHE)'r'(?:\s+(?:MIDI|SOIR))?', re.IGNORECASE)
 
 
+# Convert an Excel value to readable text, leaving dish names unstandardized.
 def cell_text(value):
     """Return a readable cell string without changing its culinary meaning.
 
@@ -59,6 +71,7 @@ def cell_text(value):
     return ' '.join(str(value).replace('\u00a0', ' ').split())
 
 
+# Normalize text only for structural comparisons, not exported dish content.
 def match_text(value):
     """Normalize text only for detecting workbook structure, not CSV values.
 
@@ -71,6 +84,7 @@ def match_text(value):
     return ''.join(char for char in normalized if not unicodedata.combining(char))
 
 
+# Identify a weekday label so it is not exported as food.
 def is_day_label(value):
     """Detect a weekday or weekday/service label in a structural cell.
 
@@ -82,6 +96,7 @@ def is_day_label(value):
     return bool(DAY_LABEL.fullmatch(match_text(value).strip()))
 
 
+# Determine the workbook layout and week from its directory and filename.
 def expected_sheet(path, root):
     """Return the exact expected sheet name type and week for a workbook.
 
@@ -112,6 +127,7 @@ def expected_sheet(path, root):
     raise ValueError(f"Unsupported year: {year}")
 
 
+# Check whether a worksheet name matches the expected format.
 def sheet_matches(name, fmt, week):
     """Check whether a sheet is suitable for the selected year's layout."""
     normalized = match_text(name).strip()
@@ -126,6 +142,7 @@ def sheet_matches(name, fmt, week):
     ))
 
 
+# Choose one main worksheet; prefer matching weeks and midi tabs.
 def choose_sheet(names, fmt, week):
     """Choose exactly one sheet; never guess among ambiguous multi-sheet grids.
 
@@ -147,6 +164,10 @@ def choose_sheet(names, fmt, week):
         # Prefer the recap grid over other sheets of the same week.
         matches.sort(key=lambda name: ('midi' not in match_text(name), names.index(name)))
         return matches[0], None
+    midi = [name for name in names if re.search(r'(?<![a-z])midi(?![a-z])', match_text(name))]
+    if len(midi) == 1:
+        return midi[0], (f"sheet name {midi[0]!r} does not match week {week}; "
+                         "using the only midi sheet")
     if len(names) == 1:
         # Many historical workbooks were copied without renaming their only tab.
         return names[0], (f"sheet name {names[0]!r} does not match week {week}; "
@@ -154,6 +175,7 @@ def choose_sheet(names, fmt, week):
     return None, None
 
 
+# Read a limited rectangle from the chosen main worksheet.
 def read_selected_sheet(path, fmt, week):
     """Read only the expected worksheet and report the other worksheet names.
 
@@ -204,6 +226,57 @@ def read_selected_sheet(path, fmt, week):
     return selected, cell, names, skipped, selection_warning
 
 
+
+# Read every nonempty cell from a delivery or Median annex.
+def read_annex_cells(path, sheet_name):
+    """Read populated cells of a 2022-2023 annex, without assuming a menu layout.
+
+    The returned positions are the real 1-based Excel coordinates. Formula cells
+    are read with their cached values, as in the original extraction.
+    """
+    if path.suffix.lower() == '.xls':
+        import xlrd
+        workbook = xlrd.open_workbook(str(path), on_demand=True)
+        try:
+            sheet = workbook.sheet_by_name(sheet_name)
+            return [(r + 1, c + 1, cell_text(sheet.cell_value(r, c)))
+                    for r in range(sheet.nrows) for c in range(sheet.ncols)
+                    if cell_text(sheet.cell_value(r, c))]
+        finally:
+            workbook.release_resources()
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheet = workbook[sheet_name]
+        sheet.reset_dimensions()
+        return [(r, c, cell_text(value))
+                for r, values in enumerate(sheet.iter_rows(values_only=True), 1)
+                for c, value in enumerate(values, 1) if cell_text(value)]
+    finally:
+        workbook.close()
+
+
+# Classify eligible historical annexes by worksheet name.
+def annex_kind(sheet_name):
+    """Only the two explicitly requested historical annex types qualify."""
+    normalized = match_text(sheet_name)
+    if 'livraison' in normalized:
+        return 'livraison'
+    if 'median' in normalized:
+        return 'median'
+    return None
+
+
+# Convert annex cells into raw records with precise Excel provenance.
+def extract_annex(path, root, sheet_name, kind):
+    """Store raw nonempty cells; do not mislabel delivery metadata as dishes."""
+    return [{**source_info(path, root, sheet_name, row),
+             'colonne_excel': col, 'categorie': kind,
+             'sous_categorie': 'cellule_brute', 'proposition': value,
+             'type_feuille': kind}
+            for row, col, value in read_annex_cells(path, sheet_name)]
+
+
+# Detect menu column headers from rows 3 to 6.
 def find_header(cell):
     """Find food columns in recent worksheets using their header labels.
 
@@ -237,6 +310,7 @@ def find_header(cell):
     return best_mapping, best_row
 
 
+# Attach workbook, relative path, worksheet and row provenance.
 def source_info(path, root, sheet, row):
     """Build provenance fields for an extracted cell or meal.
 
@@ -253,6 +327,7 @@ def source_info(path, root, sheet, row):
                 onglet=sheet, ligne_excel=row)
 
 
+# Extract complete meal rows from recent layouts.
 def extract_meals(path, root, sheet, cell, mapping, header_row, recap=False):
     """Extract meal rows while preserving the food-cell text.
 
@@ -287,6 +362,7 @@ def extract_meals(path, root, sheet, cell, mapping, header_row, recap=False):
     return meals
 
 
+# Extract individual food proposals from fixed historical grid positions.
 def extract_grid(path, root, sheet, cell):
     """Extract individual proposals from historical fixed-layout worksheets.
 
@@ -310,6 +386,7 @@ def extract_grid(path, root, sheet, cell):
 
 
 
+# Write a UTF-8 BOM semicolon-delimited CSV file.
 def write_csv(path, columns, records):
     """Write records as a semicolon-delimited UTF-8 CSV file.
 
@@ -326,6 +403,7 @@ def write_csv(path, columns, records):
         writer.writerows(records)
 
 
+# Orchestrate input discovery, extraction, alerts, deduplication and output.
 def main():
     """Extract one designated sheet per workbook to a unified CSV.
 
@@ -353,8 +431,9 @@ def main():
     files = sorted(path for path in args.input.rglob('*')
                    if path.is_file() and path.suffix.lower() in ('.xls', '.xlsx')
                    and not path.name.startswith('~$'))
-    meals, proposals, alerts, counts = [], [], [], Counter()
+    meals, proposals, annexes, alerts, counts = [], [], [], [], Counter()
 
+    # Collect alerts in memory without per-file terminal output.
     def alert(relative, level, code, message, sheet='', total_sheets=None):
         """Collect a warning or error without printing it to the terminal."""
         alerts.append({
@@ -366,6 +445,7 @@ def main():
             'message': message,
         })
 
+    # Process every discovered Excel workbook.
     for path in files:
         relative = path.relative_to(args.input).as_posix()
         try:
@@ -382,9 +462,37 @@ def main():
             if selection_warning:
                 alert(relative, 'AVERTISSEMENT', 'NOM_FEUILLE_DIFFERENT',
                       selection_warning, sheet=name, total_sheets=len(names))
-            if skipped:
+            # Extract annex sheets only for 2022 and 2023.
+            # 2022-2023: read delivery and Median tabs as additional raw cells.
+            # 2024-2026: preserve the original one-sheet-only behavior.
+            year = int(next(part for part in path.relative_to(args.input).parts[:-1]
+                            if re.fullmatch(r"20\d{2}", part)))
+            remaining = []
+            if year in (2022, 2023):
+                for extra_name in skipped:
+                    kind = annex_kind(extra_name)
+                    if kind is None:
+                        remaining.append(extra_name)
+                        continue
+                    try:
+                        extracted_extra = extract_annex(path, args.input, extra_name, kind)
+                        annexes.extend(extracted_extra)
+                        counts['annex_sheets'] += 1
+                        if not extracted_extra:
+                            alert(relative, 'AVERTISSEMENT', 'ANNEXE_VIDE',
+                                  f"Aucune cellule non vide dans {extra_name!r}",
+                                  sheet=extra_name, total_sheets=len(names))
+                    except Exception as exc:
+                        remaining.append(extra_name)
+                        alert(relative, 'ERREUR', 'LECTURE_ANNEXE',
+                              f"{type(exc).__name__}: {exc}",
+                              sheet=extra_name, total_sheets=len(names))
+            else:
+                remaining = skipped
+            if remaining:
                 alert(relative, 'AVERTISSEMENT', 'FEUILLES_IGNOREES',
-                      f"1 feuille traitee ({name!r}); {len(skipped)} ignoree(s) : {skipped!r}",
+                      f"1 feuille principale traitee ({name!r}); "
+                      f"{len(remaining)} ignoree(s) : {remaining!r}",
                       sheet=name, total_sheets=len(names))
             mapping, header = (find_header(cell) if fmt != 'GRILLE' else (None, None))
             if fmt != 'GRILLE' and mapping is None:
@@ -410,25 +518,40 @@ def main():
             alert(relative, 'ERREUR', 'EXCEPTION',
                   f'{type(exc).__name__}: {exc}')
 
+    # Unify meal, historical proposal and annex records into one schema.
     columns = ('type_enregistrement', *MENU_COLUMNS,
-               'colonne_excel', 'categorie', 'sous_categorie', 'proposition')
+               'colonne_excel', 'categorie', 'sous_categorie', 'proposition', 'type_feuille')
     records = ([{'type_enregistrement': 'repas', **row} for row in meals]
-               + [{'type_enregistrement': 'plat_historique', **row} for row in proposals])
+               + [{'type_enregistrement': 'plat_historique', 'type_feuille': 'principale', **row}
+                  for row in proposals]
+               + [{'type_enregistrement': 'cellule_annexe', **row} for row in annexes])
+    # Remove duplicates by source coordinates, not by dish text.
+    # Coordinates identify a unique source cell, even if its text occurs elsewhere.
+    unique_records = {}
+    for record in records:
+        key = (record.get('chemin_source'), record.get('onglet'),
+               record.get('ligne_excel'), record.get('colonne_excel'),
+               record.get('type_enregistrement'))
+        unique_records.setdefault(key, record)
+    records = list(unique_records.values())
     args.output.mkdir(parents=True, exist_ok=True)
     write_csv(args.output / 'historique_menus.csv', columns, records)
     write_csv(args.output / 'alert.csv',
               ('fichier_source', 'niveau', 'code', 'onglet', 'nombre_feuilles', 'message'),
               alerts)
 
+    # Calculate final summary counts and print one terminal line.
     successful = counts['MENUS'] + counts['RECAP'] + counts['GRILLE']
     error_count = sum(item['niveau'] == 'ERREUR' for item in alerts)
     warning_count = sum(item['niveau'] == 'AVERTISSEMENT' for item in alerts)
     print(f"Extraction terminee | fichiers : {len(files)} | traites : {successful} "
           f"| non traites : {len(files) - successful} | erreurs : {error_count} "
           f"| avertissements : {warning_count} | repas : {len(meals)} "
-          f"| propositions : {len(proposals)} | sorties : "
+          f"| propositions : {len(proposals)} | feuilles annexes : {counts['annex_sheets']} "
+          f"| cellules annexes : {len(annexes)} | sorties : "
           f"{args.output / 'historique_menus.csv'}, {args.output / 'alert.csv'}")
 
 
+# Run main only when this file is executed directly.
 if __name__ == '__main__':
     main()
