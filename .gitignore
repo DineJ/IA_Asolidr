@@ -1,2 +1,6 @@
 # ignore .env
 .env
+
+# ignore cache
+__pycache__
+test/__pycache__
