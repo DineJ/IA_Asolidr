@@ -1,0 +1,76 @@
+erDiagram
+
+UTILISATEUR ||--o{ COMMANDE : passer
+UTILISATEUR }|--o{ LIVRAISON : faire
+
+COMMANDE ||--o{ BON_COMMANDE : posséder
+COMMANDE }|--|| LIVRAISON : livrer
+COMMANDE }o--|| SITE : avoir
+
+COMMANDE }o--|{ COMMANDE_SERVICE : proposer
+COMMANDE_SERVICE }o--|{ SERVICE : proposer
+
+LIVRAISON ||--o{ SIGNATURE : signer
+
+UTILISATEUR {
+     int id PK "AI"
+     varchar(50) nom "NOT NULL"
+     varchar(50) prenom "NOT NULL"
+     varchar(100) mail UK
+     varchar(250) mdp UK "NOT NULL & HASHAGE"
+     smallint permission "0 = aucune; 1 = permission 1; & DEFAULT 0"
+     boolean actif "DEFAULT 1"
+}
+
+SITE {
+    int id PK "AI"
+    smallint numéro "NOT NULL & CHECK > 0"
+    varchar(100) nom "NOT NULL"
+    varchar(100) ville "NOT NULL"
+    char(5) code_postal "NOT NULL"
+    varchar(255) contact "NOT NULL"
+    smallint allergene "0 = aucun 1 = allergene1; 2 = allergene2; & NOT NULL"
+    smallint nombre_allerge "NOT NULL & DEFAULT 0"
+    boolean actif "DEFAULT 1"
+}
+
+SIGNATURE {
+    int id PK "AI"
+    int id_livraison FK
+    date_time date "NOT NULL & CHECK <= now"
+    blob signature "NOT NULL"
+}
+
+COMMANDE {
+    int id PK "AI"
+    int id_client FK
+    int id_site FK
+    smallint quantité "NOT NULL"
+}
+
+BON_COMMANDE {
+   int id PK "AI"
+   int id_commande FK
+   date date_livraison "NOT NULL & CHECK >= now"
+   varchar(255) nom_receptionniste "NOT NULL"
+   text commentaire_receptionniste "DEFAULT = PAS DE COMMENTAIRE"
+   text commentaire_livreur "DEFAULT = PAS DE COMMENTAIRE"
+}
+
+LIVRAISON {
+    int id PK "AI"
+    int id_commande FK
+    int id_livreur FK
+    datetime date "NOT NULL & CHECK <= now"
+}
+
+SERVICE {
+   int id PK "AI"
+   enum nom "DÉJEUNER;REPAS MIDI;REPAS SOIR;GOÛTER;BUFFET & NOT NULL"
+}
+
+COMMANDE_SERVICE {
+    int id_commande PK,FK
+    int id_service PK,FK
+    int quantité "NOT NULL"
+}

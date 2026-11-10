@@ -1,0 +1,12 @@
+flowchart
+
+A["Login"]
+B["Accueil"]
+B0["Menus"]
+B1["Commande"]
+
+A --> |Consultation| B
+
+B --> |Déconnexion| A
+B --> |Consulter| B0
+B --> |Consulter| B1

@@ -1,0 +1,36 @@
+
+flowchart TD
+    A["Application de prestations"]
+    B[("BDD MySQL")]
+    C["Extraction des données"]
+    D["Nettoyage et normalisation"]
+    E[("Tables IA dans MySQL")]
+    F["Entraînement du modèle"]
+    G["Évaluation du modèle"]
+    H{"Modèle validé ?"}
+    I["Sauvegarde du modèle"]
+    J[("Dossier de fichiers sur le serveur")]
+    K["Déploiement du modèle"]
+    L["IA disponible"]
+
+    X["Analyse des erreurs"]
+    Y["Correction des données ou paramètres"]
+
+    A -->|Enregistrement| B
+    B --> C
+    C --> D
+    D --> E
+    E --> F
+    F --> G
+    G --> H
+
+    H -->|Oui| I
+    I --> J
+    J --> K
+    K --> L
+
+    H -->|Non| X
+    X --> Y
+    Y -->|Nouvel entraînement| F
+
+    I -.->|Version, chemin et état| B
