@@ -1,381 +1,315 @@
-
 #!/usr/bin/env python3
-# Clean extracted Excel data while retaining source values and review flags.
-# Dependances : pip install pandas
-from pathlib import Path
+"""Clean yearly menu histories without changing the original source files.
+
+Example: python clean_menu.py --entree data/processed --sortie data/processed/nettoyage
+Dependencies: pip install pandas rapidfuzz
+
+Only 2025 and 2026 are processed. Outputs include one cleaned CSV per year,
+alert.csv and modifications.csv. MENU, weekday names, MIDI and SOIR are kept.
+Validated corrections are logged; RapidFuzz only suggests possible typos.
+Empty values are exported as the literal NaN marker.
+"""
+
 import argparse
 import re
 import unicodedata
+from pathlib import Path
 import pandas as pd
 
-CHAMPS_MENU = ['entree', 'proteine', 'feculent', 'legumes', 'dessert_base', 'dessert_resto', 'enfant']
-VIDES = {'', '-', '--', '---', '/', 'nan', 'none', 'null', 'n/a', '0'}
-
-# Uniquement les quantites en fin de texte. Ne pas toucher aux noms de recettes
-# tels que "4 epices", "7 legumes" ou "2 chocolats".
-QUANTITE_FIN = re.compile(
-    r'(?i)(?:\s*[,;:/-]?\s*'
-    r'(?:\(\s*\d+(?:[.,]\d+)?\s*'
-    r'(?:kg|kgs|g|grammes?|parts?|portions?)\s*\)'
-    r'|\d+(?:[.,]\d+)?\s*'
-    r'(?:kg|kgs|g|grammes?|parts?|portions?))'
-    r'\s*)+$'
-)
-QUANTITE_DANS = re.compile(
-    r'(?i)\b\d+(?:[.,]\d+)?\s*(?:kg|kgs|g|grammes?|parts?|portions?)\b'
-)
-NOMBRE_SEUL = re.compile(r'[+-]?\d+(?:[.,]\d+)?')
-QUANTITE_SEULE = re.compile(
-    r'(?i)\d+(?:[.,]\d+)?\s*(?:kg|kgs|g|grammes?|parts?|portions?)'
-)
-JOUR_SERVICE = re.compile(
-    r'(?i)(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)'
-    r'(?:\s+(?:midi|soir))?'
-)
-
-# A service reference embedded in a dish name is not a standalone dish label.
-SERVICE_IN_TITLE = re.compile(
-    r'(?i)\bmenu\s+(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche)'
-    r'\s+(?:midi|soir)\b'
-)
-
-CONSIGNE = re.compile(
-    r'(?i)\b(?:prevoir|prévoir|attention|dlc|à découper|a decouper|'
-    r'pas de repas|cuisine\s*\+\s*menage|cuisine\s*\+\s* ménage)\b'
-)
+CHAMPS_REPAS = ('entree', 'proteine', 'feculent', 'legumes', 'dessert_base', 'dessert_resto')
+VIDES = {'', '(vide)', '(vides)', 'nan', 'none', 'null', 'n/a', 'na', '-', '--', '---', '/'}
+JOUR = re.compile(r'(?:LUNDI|MARDI|MERCREDI|JEUDI|VENDREDI|SAMEDI|DIMANCHE)(?:\s+(?:MIDI|SOIR))?', re.I)
+QUANTITE_SEULE = re.compile(r'\d+(?:[.,]\d+)?\s*(?:KG|KGS|G|GRAMMES?|PARTS?|PORTIONS?)?', re.I)
+QUANTITE_DANS = re.compile(r'\b\d+(?:[.,]\d+)?\s*(?:KG|KGS|G|GRAMMES?|PARTS?|PORTIONS?)\b', re.I)
+CONSIGNE = re.compile(r'\b(?:PREVOIR|PRÉVOIR|ATTENTION|DLC|À DÉCOUPER|A DECOUPER|PAS DE REPAS)\b', re.I)
+# Validated replacements live in corrections.csv.
+# RapidFuzz suggests possible typos but never changes menu text automatically.
+import csv
+from rapidfuzz import fuzz, process
 
 
-def normaliser_espaces(valeur):
+def charger_corrections(chemin):
+    """Load validated word and phrase corrections from a semicolon-separated CSV."""
+    if not chemin.is_file():
+        raise FileNotFoundError(f'Fichier de corrections introuvable : {chemin}')
+    regles = {'mot': {}, 'expression': {}}
+    with chemin.open(encoding='utf-8-sig', newline='') as fichier:
+        lecteur = csv.DictReader(fichier, delimiter=';')
+        if not {'type', 'incorrect', 'correct'} <= set(lecteur.fieldnames or []):
+            raise ValueError('corrections.csv doit contenir type;incorrect;correct')
+        for numero, ligne in enumerate(lecteur, 2):
+            type_regle = (ligne['type'] or '').strip().lower()
+            incorrect = (ligne['incorrect'] or '').strip().upper()
+            correct = (ligne['correct'] or '').strip().upper()
+            if type_regle not in regles or not incorrect or not correct:
+                raise ValueError(f'Règle invalide à la ligne {numero} de {chemin}')
+            if incorrect in regles[type_regle] and regles[type_regle][incorrect] != correct:
+                raise ValueError(f'Corrections contradictoires pour {incorrect} (ligne {numero})')
+            regles[type_regle][incorrect] = correct
+    return regles
+
+
+def suggestions_rapidfuzz(texte, vocabulaire, seuil=88):
+    """Suggest similar words from the validated vocabulary without replacing them."""
+    # Ignore short words to reduce false positives.
+    resultat = []
+    vus = set()
+    for mot in re.findall(r"[A-ZÀ-ÖØ-ÝŒ]+(?:['’-][A-ZÀ-ÖØ-ÝŒ]+)*", texte):
+        if len(mot) < 5 or mot in vocabulaire or mot in vus:
+            continue
+        vus.add(mot)
+        proposition = process.extractOne(mot, vocabulaire, scorer=fuzz.ratio,
+                                         score_cutoff=seuil)
+        if proposition and proposition[0] != mot:
+            resultat.append((mot, proposition[0], round(proposition[1], 1)))
+    return resultat
+
+
+# Keep service labels because they may be meaningful source information.
+SERVICE = re.compile(r'\bMENU\s+(?:LUNDI|MARDI|MERCREDI|JEUDI|VENDREDI|SAMEDI|DIMANCHE)\s+(?:MIDI|SOIR)\b', re.I)
+
+
+def nettoyer_avec_regles(valeur, regles):
+    """Clean one value and return each applied rule with its before/after values.
+
+    Case conversion and whitespace normalization are intentionally not logged.
+    """
     if pd.isna(valeur):
-        return ''
-    s = str(valeur).replace('\u00a0', ' ').replace('\n', ' ').replace('\r', ' ')
-    s = re.sub(r'\s+', ' ', s).strip(' \t;|')
-    if s.casefold() in VIDES or not re.search(r'\w', s, re.UNICODE):
-        return ''
-    return s
+        return pd.NA, []
+
+    # Normalize case and whitespace without adding change-log entries.
+    texte = re.sub(r'\s+', ' ', str(valeur).replace('\u00a0', ' ')).strip().upper()
+    etapes = []
+
+    def enregistrer(code, explication, apres):
+        nonlocal texte
+        if apres != texte:
+            etapes.append((code, explication, texte, apres))
+            texte = apres
+
+    # Convert recognized empty-value markers to missing values.
+    if texte.casefold() in VIDES:
+        if texte:
+            etapes.append(('REMPLACE_PAR_NAN',
+                           f'Valeur considérée comme vide ({texte}) : remplacement par NaN.',
+                           texte, 'NaN'))
+        return pd.NA, etapes
+
+    # Remove the (HALAL) label and normalize the remaining whitespace.
+    apres, nombre = re.subn(r'\(\s*HALAL\s*\)', '', texte)
+    if nombre:
+        apres = re.sub(r'\s+', ' ', apres).strip()
+        enregistrer('MENTION_HALAL_SUPPRIMEE',
+                    f'Mention (HALAL) supprimée ({nombre} occurrence(s)).', apres)
+
+    # Normalize apostrophes and compatible Unicode characters; log changes.
+    apres = unicodedata.normalize('NFKC', texte).replace('’', "'").replace('`', "'")
+    enregistrer('APOSTROPHE_NORMALISEE',
+                "Harmonisation des caractères typographiques et apostrophes.", apres)
+
+    # Apply longer validated phrases first and log each replacement.
+    for erreur, correction in sorted(regles['expression'].items(),
+                                     key=lambda item: -len(item[0])):
+        apres, nombre = re.subn(r'(?<!\w)' + re.escape(erreur) + r'(?!\w)',
+                                correction, texte)
+        if nombre:
+            enregistrer('EXPRESSION_CORRIGEE',
+                        f'Expression corrigée : {erreur} → {correction} ({nombre} occurrence(s)).',
+                        apres)
+
+    # Apply validated whole-word spelling and accent corrections.
+    for erreur, correction in regles['mot'].items():
+        if erreur == correction:
+            continue
+        apres, nombre = re.subn(r'(?<!\w)' + re.escape(erreur) + r'(?!\w)',
+                                correction, texte)
+        if nombre:
+            enregistrer('ORTHOGRAPHE_CORRIGEE',
+                        f'Orthographe/accents : {erreur} → {correction} ({nombre} occurrence(s)).',
+                        apres)
+
+    # Treat values emptied by cleaning as missing.
+    if not texte:
+        etapes.append(('REMPLACE_PAR_NAN',
+                       'Aucun texte ne reste après nettoyage : remplacement par NaN.',
+                       '', 'NaN'))
+        return pd.NA, etapes
+    return texte, etapes
 
 
-def nettoyer(valeur):
-    original = normaliser_espaces(valeur)
-    if not original:
-        return '', ''
-
-    # Flag structural or quantity-only values without losing their source text.
-    if NOMBRE_SEUL.fullmatch(original) or QUANTITE_SEULE.fullmatch(original):
-        return original, 'quantite_seule_a_verifier'
-    if JOUR_SERVICE.fullmatch(original):
-        return original, 'jour_service_a_verifier'
-
-    nettoye = QUANTITE_FIN.sub('', original).strip(' ,;:/-')
-
-    if not nettoye:
-        return original, 'quantite_seule_a_verifier'
-
-    remarques = []
-
-    if nettoye != original:
-        remarques.append('quantite_finale_retirée')
-
-    if QUANTITE_DANS.search(nettoye):
-        remarques.append('quantite_interne_a_verifier')
-
-    if CONSIGNE.search(nettoye):
-        remarques.append('consigne_a_verifier')
-
-    if SERVICE_IN_TITLE.search(nettoye):
-        remarques.append('mention_service_a_verifier')
-
-    return nettoye, '|'.join(remarques)
+def normaliser(valeur, regles):
+    """Return only the cleaned value, without the change log."""
+    return nettoyer_avec_regles(valeur, regles)[0]
 
 
-def cle_texte(texte):
-    # Regrouper les variantes de casse et d'espaces sans corriger
-    # automatiquement les fautes ni fusionner des recettes differentes.
-    texte = unicodedata.normalize('NFKC', texte).casefold()
-    return re.sub(r'\s+', ' ', texte).strip()
+def motifs_suspects(texte):
+    """Flag suspicious menu values without changing their content."""
+    if pd.isna(texte):
+        return []
+    motifs = []
+    if JOUR.fullmatch(texte):
+        motifs.append('JOUR_SERVICE')
+    if QUANTITE_SEULE.fullmatch(texte):
+        motifs.append('QUANTITE_OU_NOMBRE_SEUL')
+    elif QUANTITE_DANS.search(texte):
+        motifs.append('QUANTITE_DANS_INTITULE')
+    if CONSIGNE.search(texte):
+        motifs.append('CONSIGNE')
+    if SERVICE.search(texte):
+        motifs.append('MENTION_SERVICE')
+    if len(texte) > 200:
+        motifs.append('INTITULE_TRES_LONG')
+    return motifs
 
 
-def lire_csv(chemin, requis):
-    if not chemin.exists():
-        raise FileNotFoundError(f'Fichier introuvable : {chemin}')
-
-    df = pd.read_csv(
-        chemin,
-        sep=';',
-        encoding='utf-8-sig',
-        dtype=str,
-        keep_default_na=False
-    )
-
-    manquantes = set(requis) - set(df.columns)
-
-    if manquantes:
-        raise ValueError(
-            f'{chemin.name} : colonnes absentes : {sorted(manquantes)}'
-        )
-
-    return df
-
-
-def traiter_menus(df):
-    df = df.copy()
-
-    df.insert(
-        0,
-        'id_repas',
-        [f'M{i:05d}' for i in range(1, len(df) + 1)]
-    )
+def traiter_fichier(chemin, annee, regles, vocabulaire, seuil):
+    """Clean one yearly file and collect alerts and detailed modifications."""
+    df = pd.read_csv(chemin, sep=';', encoding='utf-8-sig', dtype=str, keep_default_na=False)
+    if annee not in (2025, 2026):
+        raise ValueError(f'Annee non prise en charge : {annee}')
+    champs = CHAMPS_REPAS
+    requis = {'chemin_source', 'ligne_excel', *champs}
+    absents = requis.difference(df.columns)
+    if absents:
+        raise ValueError(f'{chemin.name} : colonnes manquantes : {", ".join(sorted(absents))}')
 
     alertes = []
+    modifications = []
+    # Preserve provenance columns and clean only the menu-item fields.
+    for champ in champs:
+        valeurs_brutes = df[champ].copy()
+        valeurs_nettoyees = []
+        for index, brut in enumerate(valeurs_brutes):
+            propre, etapes = nettoyer_avec_regles(brut, regles)
+            valeurs_nettoyees.append(propre)
+            source = df.iloc[index]
 
-    for col in CHAMPS_MENU:
-        if col not in df.columns:
-            df[col] = ''
-
-        originaux = df[col].map(normaliser_espaces)
-        nettoyes = originaux.map(nettoyer)
-
-        df[col + '_original'] = originaux
-        df[col] = nettoyes.map(lambda x: x[0])
-        df[col + '_alerte'] = nettoyes.map(lambda x: x[1])
-
-        for idx, ((_, remarque), original) in enumerate(
-            zip(nettoyes, originaux)
-        ):
-            if remarque:
-                alertes.append({
-                    'origine': 'menus',
-                    'identifiant': df.iloc[idx]['id_repas'],
-                    'fichier_source': df.iloc[idx].get('fichier_source', ''),
-                    'champ': col,
-                    'valeur_originale': original,
-                    'motif': remarque
+            # Record one log entry per applied rule, in execution order.
+            for numero, (code, explication, avant, apres) in enumerate(etapes, 1):
+                modifications.append({
+                    'annee': annee,
+                    'chemin_source': source['chemin_source'],
+                    'ligne_excel': source['ligne_excel'],
+                    'colonne_excel': source.get('colonne_excel', ''),
+                    'champ': champ,
+                    'numero_etape': numero,
+                    'regle_appliquee': code,
+                    'explication': explication,
+                    'valeur_avant_regle': avant,
+                    'valeur_apres_regle': apres,
+                    'valeur_originale': brut,
+                    'valeur_nettoyee': 'NaN' if pd.isna(propre) else propre,
                 })
 
-    df['nb_elements_renseignes'] = df[CHAMPS_MENU].ne('').sum(axis=1)
+            # Send RapidFuzz suggestions to alert.csv for manual review only.
+            if not pd.isna(propre):
+                for mot, suggestion, score in suggestions_rapidfuzz(
+                        propre, vocabulaire, seuil):
+                    alertes.append({
+                        'annee': annee,
+                        'chemin_source': source['chemin_source'],
+                        'ligne_excel': source['ligne_excel'],
+                        'colonne_ou_champ': champ,
+                        'valeur_originale': brut,
+                        'valeur_nettoyee': propre,
+                        'motif': f'SUGGESTION_ORTHOGRAPHE : {mot} → {suggestion} (score {score})',
+                    })
 
-    df['statut_structure'] = df['nb_elements_renseignes'].map(
-        lambda n: (
-            'vide_a_verifier' if n == 0
-            else 'incomplet_a_verifier' if n == 1
-            else 'conserve'
-        )
-    )
+            for motif in motifs_suspects(propre):
+                alertes.append({
+                    'annee': annee,
+                    'chemin_source': source['chemin_source'],
+                    'ligne_excel': source['ligne_excel'],
+                    'colonne_ou_champ': champ,
+                    'valeur_originale': brut,
+                    'valeur_nettoyee': propre,
+                    'motif': motif,
+                })
+        df[champ] = valeurs_nettoyees
 
-    for _, ligne in df[df['nb_elements_renseignes'] <= 1].iterrows():
+    # Flag rows with no menu items in any category.
+    sans_plat = df[list(champs)].isna().all(axis=1)
+    for _, ligne in df.loc[sans_plat].iterrows():
         alertes.append({
-            'origine': 'menus',
-            'identifiant': ligne['id_repas'],
-            'fichier_source': ligne.get('fichier_source', ''),
-            'champ': 'repas',
+            'annee': annee,
+            'chemin_source': ligne['chemin_source'],
+            'ligne_excel': ligne['ligne_excel'],
+            'colonne_ou_champ': 'repas',
             'valeur_originale': '',
-            'motif': ligne['statut_structure']
+            'valeur_nettoyee': pd.NA,
+            'motif': 'AUCUN_PLAT',
         })
-
-    return df, alertes
-
-
-def traiter_propositions(df):
-    df = df.copy()
-
-    df.insert(
-        0,
-        'id_proposition',
-        [f'P{i:05d}' for i in range(1, len(df) + 1)]
-    )
-
-    df['proposition_originale'] = df['proposition'].map(normaliser_espaces)
-
-    nettoyes = df['proposition_originale'].map(nettoyer)
-
-    df['proposition'] = nettoyes.map(lambda x: x[0])
-    df['cle_intitule'] = df['proposition'].map(cle_texte)
-    df['proposition_alerte'] = nettoyes.map(lambda x: x[1])
-
-    alertes = []
-
-    for _, ligne in df.iterrows():
-        _, remarque = nettoyer(ligne['proposition_originale'])
-
-        if not ligne['proposition']:
-            remarque = (remarque + '|valeur_vide').strip('|')
-
-        if remarque:
-            alertes.append({
-                'origine': 'propositions_anciennes',
-                'identifiant': ligne['id_proposition'],
-                'fichier_source': ligne.get('fichier_source', ''),
-                'champ': 'proposition',
-                'valeur_originale': ligne['proposition_originale'],
-                'motif': remarque
-            })
-
-    return df, alertes
-
-
-def catalogue(menus, propositions):
-    morceaux = []
-
-    correspondance = {
-        'entree': 'entree',
-        'proteine': 'proteine',
-        'feculent': 'feculent',
-        'legumes': 'legume',
-        'dessert_base': 'dessert',
-        'dessert_resto': 'dessert',
-        'enfant': 'enfant'
-    }
-
-    for col, categorie in correspondance.items():
-        part = menus.loc[
-            menus[col].ne('')
-            & ~menus[col + '_alerte'].str.contains(
-                'quantite_seule_a_verifier|jour_service_a_verifier|'
-                'mention_service_a_verifier|consigne_a_verifier', regex=True
-            ),
-            ['id_repas', 'fichier_source', col]
-        ].copy()
-
-        part.columns = [
-            'identifiant_source',
-            'fichier_source',
-            'intitule'
-        ]
-
-        part['categorie'] = categorie
-        part['origine'] = 'menus'
-
-        morceaux.append(part)
-
-    part = propositions.loc[
-        propositions['proposition'].ne('')
-        & ~propositions['proposition_alerte'].str.contains(
-            'quantite_seule_a_verifier|jour_service_a_verifier|'
-            'mention_service_a_verifier|consigne_a_verifier', regex=True
-        ),
-        ['id_proposition', 'fichier_source', 'proposition', 'categorie']
-    ].copy()
-
-    part.columns = [
-        'identifiant_source',
-        'fichier_source',
-        'intitule',
-        'categorie'
-    ]
-
-    part['origine'] = 'propositions_anciennes'
-    morceaux.append(part)
-
-    toutes = pd.concat(morceaux, ignore_index=True)
-    toutes['cle_intitule'] = toutes['intitule'].map(cle_texte)
-
-    # Garder les categories distinctes :
-    # plat != proteine, fruit != dessert.
-    cat = (
-        toutes.groupby(['categorie', 'cle_intitule'], as_index=False)
-        .agg(
-            intitule=('intitule', 'first'),
-            occurrences=('intitule', 'size'),
-            fichiers_distincts=('fichier_source', 'nunique')
-        )
-    )
-
-    return cat[
-        [
-            'categorie',
-            'intitule',
-            'occurrences',
-            'fichiers_distincts',
-            'cle_intitule'
-        ]
-    ].sort_values(
-        ['categorie', 'occurrences', 'intitule'],
-        ascending=[True, False, True]
-    )
+    return df, alertes, modifications
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='Nettoyage des menus sans dates ni services'
-    )
-
-    parser.add_argument(
-        '--entree',
-        type=Path,
-        default=Path('data/processed'),
-        help='Dossier contenant menus.csv et propositions_anciennes.csv'
-    )
-
-    parser.add_argument(
-        '--sortie',
-        type=Path,
-        default=Path('data/processed/nettoyage')
-    )
-
-    parser.add_argument('--ecraser', action='store_true',
-                        help='Allow overwriting previously generated cleaned CSV files')
+    """Validate CLI arguments and generate the cleaned files and audit logs."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--entree', type=Path, default=Path('data/processed'),
+                        help='Dossier des historique_menus_YYYY.csv')
+    parser.add_argument('--sortie', type=Path, default=Path('data/processed/nettoyage'))
+    parser.add_argument('--ecraser', action='store_true', help='Autoriser le remplacement des sorties')
+    parser.add_argument('--corrections', type=Path, default=Path(__file__).with_name('corrections.csv'),
+                        help='CSV des corrections validées')
+    parser.add_argument('--seuil', type=int, default=88,
+                        help='Score minimal RapidFuzz des suggestions (0 à 100, défaut 88)')
     args = parser.parse_args()
 
+    if not 0 <= args.seuil <= 100:
+        parser.error('--seuil doit être compris entre 0 et 100')
+    try:
+        regles = charger_corrections(args.corrections)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    # Build the fuzzy-matching vocabulary from validated spellings only.
+    vocabulaire = sorted(set(regles['mot'].values()))
+    if not args.entree.is_dir():
+        parser.error(f'Dossier introuvable : {args.entree}')
     if args.entree.resolve() == args.sortie.resolve():
-        parser.error(
-            'Le dossier de sortie doit etre different du dossier des sources.'
-        )
+        parser.error('Le dossier de sortie doit etre different du dossier source.')
 
-    menus = lire_csv(
-        args.entree / 'menus.csv',
-        ['fichier_source', 'entree', 'proteine', 'feculent', 'legumes']
-    )
+    # Ignore years 2022-2024 and unrelated files.
+    sources = [args.entree / f'historique_menus_{annee}.csv' for annee in (2025, 2026)
+               if (args.entree / f'historique_menus_{annee}.csv').is_file()]
+    if not sources:
+        parser.error('Aucun historique_menus_2025.csv ou historique_menus_2026.csv trouve.')
 
-    propositions = lire_csv(
-        args.entree / 'propositions_anciennes.csv',
-        ['fichier_source', 'categorie', 'proposition']
-    )
+    destinations = [args.sortie / f'{p.stem}_nettoye.csv' for p in sources]
+    destinations.extend([args.sortie / 'alert.csv', args.sortie / 'modifications.csv'])
+    deja = [p.name for p in destinations if p.exists()]
+    if deja and not args.ecraser:
+        parser.error(f'Sorties deja presentes : {", ".join(deja)}. Utiliser --ecraser.')
 
-    menus_propres, alertes_m = traiter_menus(menus)
-    propositions_propres, alertes_p = traiter_propositions(propositions)
-
-    cat = catalogue(menus_propres, propositions_propres)
+    # Process all input files before writing any output.
+    resultats, alertes, modifications = [], [], []
+    for source in sources:
+        annee = int(source.stem.rsplit('_', 1)[-1])
+        propre, problemes, changements = traiter_fichier(source, annee, regles, vocabulaire, args.seuil)
+        resultats.append((args.sortie / f'{source.stem}_nettoye.csv', propre))
+        alertes.extend(problemes)
+        modifications.extend(changements)
 
     args.sortie.mkdir(parents=True, exist_ok=True)
-    existing = [name for name in ('menus_nettoyes.csv', 'propositions_nettoyees.csv',
-                'catalogue_plats.csv', 'a_verifier.csv') if (args.sortie / name).exists()]
-    if existing and not args.ecraser:
-        parser.error('Sortie deja presente : ' + ', '.join(existing)
-                     + '. Utiliser un autre --sortie ou --ecraser.')
+    for destination, donnees in resultats:
+        donnees.to_csv(destination, sep=';', index=False, encoding='utf-8-sig', na_rep='NaN')
+        print(f'{destination.name} : {len(donnees)} lignes')
 
-    sorties = {
-        'menus_nettoyes.csv': menus_propres,
-        'propositions_nettoyees.csv': propositions_propres,
-        'catalogue_plats.csv': cat,
-        'a_verifier.csv': pd.DataFrame(
-            alertes_m + alertes_p,
-            columns=[
-                'origine',
-                'identifiant',
-                'fichier_source',
-                'champ',
-                'valeur_originale',
-                'motif'
-            ]
-        )
-    }
-
-    for nom, table in sorties.items():
-        table.to_csv(
-            args.sortie / nom,
-            sep=';',
-            index=False,
-            encoding='utf-8-sig'
-        )
-        print(f'{nom} : {len(table)} lignes')
-
-    print(
-        '\nRepas incomplets (0 ou 1 element) :',
-        (menus_propres.nb_elements_renseignes <= 1).sum()
-    )
-
-    print('Aucun fichier source n a ete modifie.')
-    print('Les lignes sources sont conservees; les intitules suspects sont exclus du catalogue uniquement.')
+    colonnes = ('annee', 'chemin_source', 'ligne_excel', 'colonne_ou_champ',
+                'valeur_originale', 'valeur_nettoyee', 'motif')
+    pd.DataFrame(alertes, columns=colonnes).to_csv(
+        args.sortie / 'alert.csv', sep=';', index=False, encoding='utf-8-sig', na_rep='NaN')
+    colonnes_modifications = ('annee', 'chemin_source', 'ligne_excel',
+                              'colonne_excel', 'champ', 'numero_etape',
+                              'regle_appliquee', 'explication',
+                              'valeur_avant_regle', 'valeur_apres_regle',
+                              'valeur_originale', 'valeur_nettoyee')
+    pd.DataFrame(modifications, columns=colonnes_modifications).to_csv(
+        args.sortie / 'modifications.csv', sep=';', index=False,
+        encoding='utf-8-sig', na_rep='NaN')
+    print(f'alert.csv : {len(alertes)} alertes')
+    print(f'modifications.csv : {len(modifications)} regles appliquees '
+          '(hors majuscules et espaces)')
+    print('Fichiers sources inchanges.')
 
 
 if __name__ == '__main__':
