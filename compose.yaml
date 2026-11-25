@@ -61,6 +61,28 @@ services:
       postgres:
         condition: service_healthy
 
+
+  # Python data processing environment
+  ia:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: ia_asolidr_python:local
+
+    profiles:
+      - processing
+
+    user: "${APP_UID}:${APP_GID}"
+
+    volumes:
+      - ./data/raw:/app/data/raw:ro
+      - ./data/processed:/app/data/processed
+      - ./corrections.csv:/app/corrections.csv:ro
+
+    networks:
+      - backend_network
+
 volumes:
   postgres_data:
   pgadmin_data:

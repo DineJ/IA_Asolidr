@@ -1,0 +1,29 @@
+
+# Git repository
+.git/
+.github/
+.gitignore
+
+# Virtual environments
+.env
+.env.*
+.venv/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Application data
+data/
+backups/
+
+# Logs
+*.log
+
+# IDE configuration
+.vscode/
+.idea/
+
